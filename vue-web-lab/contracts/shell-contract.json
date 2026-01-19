@@ -1,0 +1,71 @@
+{
+  "version": "0.1.0",
+  "description": "Shell contract fixtures for cross-platform parity (native + wasm).",
+  "verbs": ["get", "put", "all", "on", "close"],
+  "paths": {
+    "/system/auth/status": {
+      "type": "system",
+      "shape": {
+        "locked": "boolean",
+        "initialized": "boolean"
+      }
+    },
+    "/system/identity": {
+      "type": "system",
+      "shape": {
+        "pubkey_hex": "string",
+        "npub": "string",
+        "mobi": "string"
+      }
+    },
+    "/system/account/init": {
+      "type": "system",
+      "shape": {
+        "success": "boolean"
+      }
+    }
+  },
+  "cases": [
+    {
+      "name": "put-get-roundtrip",
+      "ops": [
+        {
+          "verb": "put",
+          "path": "/notes/hello",
+          "data": {"_type": "note@v1", "text": "hello"}
+        },
+        {
+          "verb": "get",
+          "path": "/notes/hello",
+          "expect": {
+            "key": "/notes/hello",
+            "type": "note@v1",
+            "data": {"_type": "note@v1", "text": "hello"}
+          }
+        }
+      ]
+    },
+    {
+      "name": "list-prefix",
+      "ops": [
+        {"verb": "put", "path": "/notes/a", "data": {"_type": "note@v1", "text": "a"}},
+        {"verb": "put", "path": "/notes/b", "data": {"_type": "note@v1", "text": "b"}},
+        {"verb": "all", "path": "/notes", "expect": ["/notes/a", "/notes/b"]}
+      ]
+    },
+    {
+      "name": "watch-emits-on-write",
+      "ops": [
+        {"verb": "on", "path": "/notes/**", "expect": "event"},
+        {"verb": "put", "path": "/notes/watch", "data": {"_type": "note@v1", "text": "ping"}}
+      ]
+    },
+    {
+      "name": "account-init-lock",
+      "ops": [
+        {"verb": "put", "path": "/system/account/init", "data": {"pin": "123456"}, "expect": {"success": true}},
+        {"verb": "get", "path": "/system/auth/status", "expect": {"initialized": true, "locked": true}}
+      ]
+    }
+  ]
+}

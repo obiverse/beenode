@@ -1,0 +1,197 @@
+# ============================================
+# SECURITY CRITICAL - Secrets & Credentials
+# ============================================
+
+# Environment files (may contain mnemonics, API keys)
+.env
+.env.*
+!.env.example
+!.env.test
+*.env.local
+*.env.*.local
+
+# Wallet and keychain data (NEVER commit)
+*.seed
+*.mnemonic
+*.secret
+*.key
+*.pem
+*.p12
+*.pfx
+credentials.json
+secrets.json
+keychain/
+
+# Encrypted data (still sensitive)
+*.enc
+*.encrypted
+
+# ============================================
+# Data & State (user-specific, regenerable)
+# ============================================
+
+# Beenode data directories
+data/
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+*.db
+*.db-journal
+
+# 9S store files
+store.db
+*.9s
+
+# Wallet files
+wallet.dat
+wallet.sqlite
+
+# Runtime state
+.beenode-*.json
+*.state
+*.cache
+
+# ============================================
+# Rust / Cargo
+# ============================================
+
+# Build artifacts
+target/
+**/*.rs.bk
+
+# Cargo.lock for libraries (keep for binaries if desired)
+# Uncomment if this is a library:
+# Cargo.lock
+
+# Debug symbols
+*.pdb
+*.dSYM/
+
+# Profiling
+*.profraw
+*.profdata
+perf.data
+perf.data.old
+flamegraph.svg
+
+# ============================================
+# IDE & Editor
+# ============================================
+
+# JetBrains (IntelliJ, CLion, RustRover)
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# VSCode
+.vscode/
+*.code-workspace
+
+# Vim/Neovim
+*.swp
+*.swo
+*~
+.netrwhist
+tags
+TAGS
+
+# Emacs
+*~
+\#*\#
+.#*
+*.elc
+
+# Sublime Text
+*.sublime-workspace
+*.sublime-project
+
+# ============================================
+# Operating System
+# ============================================
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# Linux
+*~
+.directory
+
+# ============================================
+# Testing & Coverage
+# ============================================
+
+# Test outputs
+*.log
+test-results/
+coverage/
+*.lcov
+*.gcov
+*.gcda
+*.gcno
+tarpaulin-report.html
+cobertura.xml
+
+# ============================================
+# Documentation Build
+# ============================================
+
+# mdBook
+book/
+
+# Rustdoc
+doc/
+target/doc/
+
+# ============================================
+# WASM Build
+# ============================================
+
+pkg/
+*.wasm
+*.wat
+
+# Node (for wasm-pack)
+node_modules/
+package-lock.json
+yarn.lock
+
+# ============================================
+# Misc
+# ============================================
+
+# Archives
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.rar
+*.7z
+
+# Backups
+*.bak
+*.backup
+*.old
+
+# Temporary files
+*.tmp
+*.temp
+tmp/
+temp/
+
+# Core dumps
+core
+core.*

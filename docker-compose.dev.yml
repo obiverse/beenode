@@ -1,0 +1,41 @@
+# Beenode Dev - Backend only (for local web dev with hot reload)
+#
+# Usage:
+#   docker compose -f docker-compose.dev.yml up
+#   cd web && npm run dev
+#
+# Web dev server (Vite) runs locally with hot reload
+# Backend runs in Docker, proxied via Vite config
+
+services:
+  beenode:
+    build:
+      context: ..
+      dockerfile: beenode/Dockerfile
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env.docker
+    environment:
+      BEENODE_APP: ${BEENODE_APP:-beetest}
+      BEENODE_NETWORK: ${BEENODE_NETWORK:-regtest}
+      BEENODE_MNEMONIC: ${BEENODE_MNEMONIC:?BEENODE_MNEMONIC required}
+      BEENODE_DATA_DIR: /data
+      BEENODE_PORT: "8080"
+      RUST_LOG: info,beenode=debug
+      BITCOIN_RPC_URL: ${BITCOIN_RPC_URL:-http://host.docker.internal:18443}
+      BITCOIN_RPC_USER: ${BITCOIN_RPC_USER:?BITCOIN_RPC_USER required}
+      BITCOIN_RPC_PASS: ${BITCOIN_RPC_PASS:?BITCOIN_RPC_PASS required}
+    volumes:
+      - beenode-dev-data:/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  beenode-dev-data:
