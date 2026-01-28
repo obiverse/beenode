@@ -34,6 +34,8 @@ native = [
     "dep:nine-s-kernel",
     "dep:bitcoin",
     "dep:bip39",
+    "dep:x25519-dalek",
+    "dep:zeroize",
     "nine-s-store/std-channel",
     "nine-s-core/std-channel",
 ]
@@ -96,6 +98,10 @@ blake3 = "1.5"
 base64 = "0.22"
 bitcoin = { version = "0.32", default-features = false, features = ["std"], optional = true }
 rand = { version = "0.8", optional = true }
+
+# WireGuard key derivation (Curve25519)
+x25519-dalek = { version = "2.0", features = ["static_secrets"], optional = true }
+zeroize = { version = "1.7", features = ["derive"], optional = true }
 
 # Async runtime (native only)
 tokio = { version = "1.37", features = ["full"], optional = true }

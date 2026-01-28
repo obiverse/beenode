@@ -62,6 +62,8 @@ pub mod mobi;
 // Identity requires bitcoin/bip39 (native only)
 #[cfg(feature = "native")]
 pub mod identity;
+#[cfg(feature = "native")]
+pub mod wireguard;
 
 // =============================================================================
 // Native-only modules (server, CLI, filesystem, tokio)
@@ -102,6 +104,8 @@ pub use nine_s_core::prelude::*;
 
 #[cfg(feature = "native")]
 pub use identity::Identity;
+#[cfg(feature = "native")]
+pub use wireguard::{WireGuardConfig, WireGuardKeypair, WireGuardNamespace};
 
 // =============================================================================
 // Re-exports: Native

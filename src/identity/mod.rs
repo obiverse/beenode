@@ -3,55 +3,125 @@
 mod bip85;
 
 use crate::mobi::Mobi;
+use crate::wireguard::{self, WireGuardKeypair};
 use nine_s_core::errors::{NineSError, NineSResult};
 
 pub use bip85::{derive_nostr_mnemonic, Bip85Error};
 
 #[derive(Debug, Clone)]
 pub struct Identity {
-    #[cfg(feature = "nostr")] pub nostr_keys: nostr::Keys,
+    #[cfg(feature = "nostr")]
+    pub nostr_keys: nostr::Keys,
     pub mobi: Mobi,
     pub pubkey_hex: String,
+    pub wireguard: WireGuardKeypair,
 }
 
 impl Identity {
     #[cfg(feature = "nostr")]
     pub fn from_seed(seed: &[u8; 64]) -> NineSResult<Self> {
-        let sk = nostr::SecretKey::from_slice(&seed[..32]).map_err(|e| NineSError::Other(e.to_string()))?;
+        let sk = nostr::SecretKey::from_slice(&seed[..32])
+            .map_err(|e| NineSError::Other(e.to_string()))?;
         let keys = nostr::Keys::new(sk);
         let pubkey_hex = keys.public_key().to_hex();
-        Ok(Self { nostr_keys: keys, mobi: Mobi::derive(&pubkey_hex)?, pubkey_hex })
+
+        // Derive WireGuard keys from the seed using HMAC
+        let wireguard = wireguard_from_seed(seed)?;
+
+        Ok(Self {
+            nostr_keys: keys,
+            mobi: Mobi::derive(&pubkey_hex)?,
+            pubkey_hex,
+            wireguard,
+        })
     }
 
     #[cfg(not(feature = "nostr"))]
     pub fn from_seed(seed: &[u8; 64]) -> NineSResult<Self> {
         use bitcoin::secp256k1::{Secp256k1, SecretKey};
         let secp = Secp256k1::new();
-        let sk = SecretKey::from_slice(&seed[..32]).map_err(|e| NineSError::Other(e.to_string()))?;
+        let sk = SecretKey::from_slice(&seed[..32])
+            .map_err(|e| NineSError::Other(e.to_string()))?;
         let pubkey_hex = hex::encode(&sk.public_key(&secp).x_only_public_key().0.serialize());
-        Ok(Self { mobi: Mobi::derive(&pubkey_hex)?, pubkey_hex })
+
+        // Derive WireGuard keys from the seed using HMAC
+        let wireguard = wireguard_from_seed(seed)?;
+
+        Ok(Self {
+            mobi: Mobi::derive(&pubkey_hex)?,
+            pubkey_hex,
+            wireguard,
+        })
     }
 
     #[cfg(feature = "nostr")]
     pub fn from_mnemonic(mnemonic_str: &str) -> NineSResult<Self> {
-        let nostr_mnemonic = derive_nostr_mnemonic(mnemonic_str, None).map_err(|e| NineSError::Other(e.to_string()))?;
-        let m = bip39::Mnemonic::parse(&nostr_mnemonic).map_err(|e| NineSError::Other(e.to_string()))?;
-        let sk = nostr::SecretKey::from_slice(&m.to_seed("")[..32]).map_err(|e| NineSError::Other(e.to_string()))?;
+        let nostr_mnemonic = derive_nostr_mnemonic(mnemonic_str, None)
+            .map_err(|e| NineSError::Other(e.to_string()))?;
+        let m = bip39::Mnemonic::parse(&nostr_mnemonic)
+            .map_err(|e| NineSError::Other(e.to_string()))?;
+        let sk = nostr::SecretKey::from_slice(&m.to_seed("")[..32])
+            .map_err(|e| NineSError::Other(e.to_string()))?;
         let keys = nostr::Keys::new(sk);
         let pubkey_hex = keys.public_key().to_hex();
-        Ok(Self { nostr_keys: keys, mobi: Mobi::derive(&pubkey_hex)?, pubkey_hex })
+
+        // Derive WireGuard keys from mnemonic
+        let wireguard = wireguard::derive_keypair(mnemonic_str, None)
+            .map_err(|e| NineSError::Other(e.to_string()))?;
+
+        Ok(Self {
+            nostr_keys: keys,
+            mobi: Mobi::derive(&pubkey_hex)?,
+            pubkey_hex,
+            wireguard,
+        })
     }
 
     #[cfg(not(feature = "nostr"))]
     pub fn from_mnemonic(mnemonic_str: &str) -> NineSResult<Self> {
         use bitcoin::secp256k1::{Secp256k1, SecretKey};
-        let nostr_mnemonic = derive_nostr_mnemonic(mnemonic_str, None).map_err(|e| NineSError::Other(e.to_string()))?;
-        let m = bip39::Mnemonic::parse(&nostr_mnemonic).map_err(|e| NineSError::Other(e.to_string()))?;
+        let nostr_mnemonic = derive_nostr_mnemonic(mnemonic_str, None)
+            .map_err(|e| NineSError::Other(e.to_string()))?;
+        let m = bip39::Mnemonic::parse(&nostr_mnemonic)
+            .map_err(|e| NineSError::Other(e.to_string()))?;
         let secp = Secp256k1::new();
-        let sk = SecretKey::from_slice(&m.to_seed("")[..32]).map_err(|e| NineSError::Other(e.to_string()))?;
+        let sk = SecretKey::from_slice(&m.to_seed("")[..32])
+            .map_err(|e| NineSError::Other(e.to_string()))?;
         let pubkey_hex = hex::encode(&sk.public_key(&secp).x_only_public_key().0.serialize());
-        Ok(Self { mobi: Mobi::derive(&pubkey_hex)?, pubkey_hex })
+
+        // Derive WireGuard keys from mnemonic
+        let wireguard = wireguard::derive_keypair(mnemonic_str, None)
+            .map_err(|e| NineSError::Other(e.to_string()))?;
+
+        Ok(Self {
+            mobi: Mobi::derive(&pubkey_hex)?,
+            pubkey_hex,
+            wireguard,
+        })
     }
+}
+
+/// Derive WireGuard keys from a 64-byte seed using HMAC-SHA512
+fn wireguard_from_seed(seed: &[u8; 64]) -> NineSResult<WireGuardKeypair> {
+    use hmac::{Hmac, Mac};
+    use sha2::Sha512;
+
+    type HmacSha512 = Hmac<Sha512>;
+
+    let mut hmac = HmacSha512::new_from_slice(b"beenode-wireguard-v1")
+        .expect("HMAC accepts any key length");
+    hmac.update(seed);
+    let result = hmac.finalize().into_bytes();
+
+    let mut private_key = [0u8; 32];
+    private_key.copy_from_slice(&result[..32]);
+
+    let public_key = wireguard::derive_public_key(&private_key);
+
+    Ok(WireGuardKeypair {
+        private_key,
+        public_key,
+    })
 }
 
 #[cfg(test)]
