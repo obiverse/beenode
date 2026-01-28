@@ -67,13 +67,13 @@ nostr = ["native", "dep:nostr", "dep:tokio-tungstenite", "dep:futures-util"]
 
 [dependencies]
 # Core 9S from beebank (nine-s-core is WASM-compatible, others are native-only)
-nine-s-core = { path = "../beebank/crates/nine-s-core", default-features = false }
+nine-s-core = { git = "https://github.com/obiverse/beebank", package = "nine-s-core", default-features = false }
 
 # Clock (Layer 0) - logical tick-driven clock (no_std compatible, works in WASM)
-beeclock-core = { path = "../beeclock/crates/beeclock-core", default-features = false, optional = true }
-nine-s-store = { path = "../beebank/crates/nine-s-store", optional = true }
-nine-s-shell = { path = "../beebank/crates/nine-s-shell", optional = true }
-nine-s-kernel = { path = "../beebank/crates/nine-s-kernel", optional = true }
+beeclock-core = { git = "https://github.com/obiverse/beeclock", package = "beeclock-core", default-features = false, optional = true }
+nine-s-store = { git = "https://github.com/obiverse/beebank", package = "nine-s-store", optional = true }
+nine-s-shell = { git = "https://github.com/obiverse/beebank", package = "nine-s-shell", optional = true }
+nine-s-kernel = { git = "https://github.com/obiverse/beebank", package = "nine-s-kernel", optional = true }
 
 # Bitcoin wallet (BDK 2.x - modern modular architecture)
 # bdk_wallet provides the high-level Wallet type
