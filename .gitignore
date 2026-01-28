@@ -192,6 +192,6 @@ yarn.lock
 tmp/
 temp/
 
-# Core dumps
-core
-core.*
+# Core dumps (root level only, not src/core/)
+/core
+/core.*
