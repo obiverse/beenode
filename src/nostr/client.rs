@@ -40,7 +40,28 @@ impl RelayClient {
     pub async fn connect(&mut self) -> anyhow::Result<mpsc::Receiver<String>> {
         *self.state.write().await = RelayState::Connecting;
 
-        let (ws, _) = connect_async(&self.url).await?;
+        tracing::debug!("[RelayClient] Connecting to: {}", self.url);
+
+        // Add 10 second timeout to prevent hanging
+        let connect_result = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            connect_async(&self.url)
+        ).await;
+
+        let (ws, _) = match connect_result {
+            Ok(Ok(conn)) => {
+                tracing::debug!("[RelayClient] WebSocket connected");
+                conn
+            }
+            Ok(Err(e)) => {
+                tracing::error!("[RelayClient] WebSocket error: {:?}", e);
+                return Err(anyhow::anyhow!("WebSocket error: {}", e));
+            }
+            Err(_) => {
+                tracing::error!("[RelayClient] Connection timeout after 10s");
+                return Err(anyhow::anyhow!("Connection timeout"));
+            }
+        };
         let (mut write, mut read) = ws.split();
 
         // Channel for outgoing messages

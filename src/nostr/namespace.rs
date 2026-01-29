@@ -8,10 +8,20 @@ use crate::mind::EffectHandler;
 use nine_s_core::prelude::*;
 use serde_json::{json, Value};
 use std::sync::{
-    Arc,
+    Arc, RwLock,
     atomic::{AtomicBool, Ordering},
 };
 use tokio::runtime::Runtime;
+
+/// Represents an active NIP-46 connection to a remote service
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+struct Nip46Connection {
+    pubkey: String,  // server pubkey (Flutter expects 'pubkey')
+    relay: String,
+    app_name: Option<String>,
+    app_url: Option<String>,
+    connected_at: i64,
+}
 
 fn scroll(key: &str, type_: &str, data: Value) -> Scroll {
     Scroll { key: key.into(), type_: type_.into(), metadata: Metadata::default(), data }
@@ -23,6 +33,8 @@ pub struct NostrNamespace {
     effect: NostrEffectHandler,
     runtime: Runtime,
     connected: AtomicBool,
+    /// Active NIP-46 connections (apps we've authenticated with)
+    nip46_connections: RwLock<Vec<Nip46Connection>>,
 }
 
 impl NostrNamespace {
@@ -35,7 +47,52 @@ impl NostrNamespace {
             effect,
             runtime,
             connected: AtomicBool::new(false),
+            nip46_connections: RwLock::new(Vec::new()),
         }
+    }
+
+    fn read_connections(&self) -> Scroll {
+        let connections = self.nip46_connections.read().unwrap();
+        let items: Vec<Value> = connections.iter().map(|c| {
+            json!({
+                "pubkey": c.pubkey,
+                "relay": c.relay,
+                "app_name": c.app_name,
+                "app_url": c.app_url,
+                "connected_at": c.connected_at
+            })
+        }).collect();
+        scroll("/nostr/connections", "nostr/connections@v1", json!({
+            "connections": items,
+            "count": items.len()
+        }))
+    }
+
+    fn add_connection(&self, pubkey: &str, relay: &str, app_name: Option<&str>, app_url: Option<&str>) {
+        let mut connections = self.nip46_connections.write().unwrap();
+        // Remove existing connection to same server (update)
+        connections.retain(|c| c.pubkey != pubkey);
+        connections.push(Nip46Connection {
+            pubkey: pubkey.to_string(),
+            relay: relay.to_string(),
+            app_name: app_name.map(String::from),
+            app_url: app_url.map(String::from),
+            connected_at: chrono::Utc::now().timestamp(),
+        });
+    }
+
+    fn remove_connection(&self, pubkey: &str) -> bool {
+        let mut connections = self.nip46_connections.write().unwrap();
+        let len_before = connections.len();
+        connections.retain(|c| c.pubkey != pubkey);
+        connections.len() < len_before
+    }
+
+    fn clear_connections(&self) -> usize {
+        let mut connections = self.nip46_connections.write().unwrap();
+        let count = connections.len();
+        connections.clear();
+        count
     }
 
     fn read_status(&self) -> Scroll {
@@ -116,13 +173,19 @@ impl NostrNamespace {
         let content = data["content"].as_str().ok_or_else(|| NineSError::Other("no 'content'".into()))?;
         let kind = data["kind"].as_u64().unwrap_or(1) as u16;
         let tags = data.get("tags").cloned().unwrap_or_else(|| json!([]));
+        let relay = data.get("relay").and_then(|v| v.as_str());
 
         let id = uuid();
-        let scroll_req = Scroll::new(&format!("{}/{}", paths::EXTERNAL_PUBLISH, id), json!({
+        let mut scroll_data = json!({
             "kind": kind,
             "content": content,
             "tags": tags,
-        }));
+        });
+        // Include relay if specified (for NIP-46 responses to specific relays)
+        if let Some(relay_url) = relay {
+            scroll_data["relay"] = json!(relay_url);
+        }
+        let scroll_req = Scroll::new(&format!("{}/{}", paths::EXTERNAL_PUBLISH, id), scroll_data);
         let result = self.runtime
             .block_on(self.effect.execute(&scroll_req))
             .map_err(|e| NineSError::Other(format!("publish: {}", e)))?;
@@ -146,6 +209,7 @@ impl NostrNamespace {
     }
 
     fn write_nip46_respond(&self, data: Value) -> NineSResult<Scroll> {
+        tracing::info!("[NIP46] write_nip46_respond called");
         let server_pubkey_hex = data["server_pubkey"]
             .as_str()
             .ok_or_else(|| NineSError::Other("Missing 'server_pubkey' field".into()))?;
@@ -156,6 +220,10 @@ impl NostrNamespace {
             .as_str()
             .ok_or_else(|| NineSError::Other("Missing 'challenge' field".into()))?;
         let challenge_id = data.get("challenge_id").and_then(|v| v.as_str());
+
+        tracing::info!("[NIP46] server_pubkey: {}...", &server_pubkey_hex[..16]);
+        tracing::info!("[NIP46] relay_url: {}", relay_url);
+        tracing::info!("[NIP46] challenge length: {}", challenge.len());
 
         let server_pubkey = nostr::PublicKey::from_hex(server_pubkey_hex)
             .map_err(|e| NineSError::Other(format!("Invalid server pubkey: {}", e)))?;
@@ -198,7 +266,30 @@ impl NostrNamespace {
             "relay": relay_url
         });
 
-        self.write_publish(publish_data)
+        let result = self.write_publish(publish_data)?;
+
+        // Store connection on successful response
+        let app_name = data.get("app_name").and_then(|v| v.as_str());
+        let app_url = data.get("app_url").and_then(|v| v.as_str());
+        self.add_connection(server_pubkey_hex, relay_url, app_name, app_url);
+        tracing::info!("[NIP46] Connection stored for pubkey: {}...", &server_pubkey_hex[..16]);
+
+        Ok(result)
+    }
+
+    fn write_connections_revoke(&self, pubkey: &str) -> NineSResult<Scroll> {
+        let removed = self.remove_connection(pubkey);
+        Ok(scroll("/nostr/connections/revoke", "nostr/connections@v1", json!({
+            "removed": removed,
+            "pubkey": pubkey
+        })))
+    }
+
+    fn write_connections_clear(&self) -> NineSResult<Scroll> {
+        let count = self.clear_connections();
+        Ok(scroll("/nostr/connections/clear", "nostr/connections@v1", json!({
+            "cleared": count
+        })))
     }
 }
 
@@ -210,6 +301,7 @@ impl Namespace for NostrNamespace {
             paths::MOBI => self.read_mobi(),
             paths::RELAYS => self.read_relays(),
             "/beebase/status" => self.read_beebase_status(),
+            "/connections" => self.read_connections(),
             _ => return Ok(None),
         }))
     }
@@ -221,7 +313,18 @@ impl Namespace for NostrNamespace {
             "/beebase/connect" => self.write_beebase_connect(data),
             "/beebase/disconnect" => self.write_beebase_disconnect(),
             "/nip46/respond" => self.write_nip46_respond(data),
-            _ => Err(NineSError::Other(format!("unknown: {}", path))),
+            "/connections/clear" => self.write_connections_clear(),
+            _ => {
+                // Handle /connections/{pubkey}/revoke pattern
+                if let Some(pubkey) = path.strip_prefix("/connections/")
+                    .and_then(|rest| rest.strip_suffix("/revoke"))
+                {
+                    if !pubkey.is_empty() {
+                        return self.write_connections_revoke(pubkey);
+                    }
+                }
+                Err(NineSError::Other(format!("unknown: {}", path)))
+            }
         }
     }
     fn list(&self, _: &str) -> NineSResult<Vec<String>> {

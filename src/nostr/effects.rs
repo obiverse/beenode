@@ -49,6 +49,7 @@ impl NostrEffectHandler {
         let content = scroll.data["content"].as_str()
             .ok_or_else(|| anyhow::anyhow!("no 'content'"))?;
         let kind = scroll.data["kind"].as_u64().unwrap_or(1) as u16;
+        let specific_relay = scroll.data.get("relay").and_then(|v| v.as_str());
 
         // Build and sign event
         let tags = parse_tags(&scroll.data);
@@ -61,7 +62,32 @@ impl NostrEffectHandler {
         );
         let event = unsigned.sign_with_keys(&self.identity.nostr_keys)?;
 
-        // Publish to all connected relays
+        // If a specific relay is requested (e.g., for NIP-46 auth), publish only there
+        if let Some(relay_url) = specific_relay {
+            tracing::info!("[NIP46] Connecting to relay: {}", relay_url);
+            let mut client = RelayClient::new(relay_url.to_string());
+            match client.connect().await {
+                Ok(_) => {
+                    tracing::info!("[NIP46] Connected to relay, publishing event");
+                    let result = client.publish(&event).await;
+                    tracing::info!("[NIP46] Publish result: {:?}", result.is_ok());
+                    // Client will be dropped after this scope (temporary connection)
+                    return Ok(json!({
+                        "status": if result.is_ok() { "published" } else { "failed" },
+                        "event_id": event.id.to_string(),
+                        "relays_count": if result.is_ok() { 1 } else { 0 },
+                        "relay": relay_url,
+                        "kind": kind
+                    }));
+                }
+                Err(e) => {
+                    tracing::error!("[NIP46] Failed to connect to relay {}: {}", relay_url, e);
+                    return Err(anyhow::anyhow!("Failed to connect to relay {}: {}", relay_url, e));
+                }
+            }
+        }
+
+        // Publish to all connected relays (default behavior)
         let clients = self.clients.read().await;
         let mut published = 0;
         for client in clients.iter() {

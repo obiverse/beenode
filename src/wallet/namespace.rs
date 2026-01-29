@@ -102,7 +102,16 @@ impl Namespace for WalletNamespace {
                 Ok(Scroll::new("/wallet/address", json!({"address": address})))
             }
             paths::RECEIVE => {
-                let address = self.wallet.receive_address()?;
+                // fresh=true → always generate a new address
+                // fresh=false (default) → return first unused address
+                let fresh = data.get("fresh")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                let address = if fresh {
+                    self.wallet.new_address()?
+                } else {
+                    self.wallet.receive_address()?
+                };
                 let amount_sat = data.get("amount_sat")
                     .and_then(|v| v.as_u64())
                     .or_else(|| data.get("amount").and_then(|v| v.as_u64()));
