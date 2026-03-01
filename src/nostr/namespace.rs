@@ -88,6 +88,11 @@ impl NostrNamespace {
         connections.len() < len_before
     }
 
+    fn get_connection(&self, pubkey: &str) -> Option<Nip46Connection> {
+        let connections = self.nip46_connections.read().unwrap();
+        connections.iter().find(|c| c.pubkey == pubkey).cloned()
+    }
+
     fn clear_connections(&self) -> usize {
         let mut connections = self.nip46_connections.write().unwrap();
         let count = connections.len();
@@ -285,6 +290,65 @@ impl NostrNamespace {
         })))
     }
 
+    /// Disconnect from a connected app and notify them via NIP-46
+    fn write_nip46_disconnect(&self, data: Value) -> NineSResult<Scroll> {
+        let server_pubkey_hex = data["pubkey"]
+            .as_str()
+            .ok_or_else(|| NineSError::Other("Missing 'pubkey' field".into()))?;
+
+        // Get connection to find relay
+        let conn = self.get_connection(server_pubkey_hex)
+            .ok_or_else(|| NineSError::Other("Connection not found".into()))?;
+
+        tracing::info!("[NIP46] Disconnecting from {}...", &server_pubkey_hex[..16.min(server_pubkey_hex.len())]);
+
+        let server_pubkey = nostr::PublicKey::from_hex(server_pubkey_hex)
+            .map_err(|e| NineSError::Other(format!("Invalid server pubkey: {}", e)))?;
+
+        // Create disconnect payload
+        let disconnect_payload = json!({
+            "method": "disconnect",
+            "pubkey": self.identity.pubkey_hex,
+        });
+        let payload_json = serde_json::to_string(&disconnect_payload)
+            .map_err(|e| NineSError::Other(format!("JSON serialize failed: {}", e)))?;
+
+        // Encrypt with NIP-44
+        let encrypted = nostr::nips::nip44::encrypt(
+            self.identity.nostr_keys.secret_key(),
+            &server_pubkey,
+            &payload_json,
+            nostr::nips::nip44::Version::V2,
+        ).map_err(|e| NineSError::Other(format!("NIP-44 encryption failed: {}", e)))?;
+
+        // Ensure connected to relay
+        if !self.connected.load(Ordering::Relaxed) {
+            let _ = self.write_connect();
+        }
+
+        // Publish disconnect event
+        let publish_data = json!({
+            "kind": 24133,
+            "content": encrypted,
+            "tags": [["p", server_pubkey_hex]],
+            "relay": conn.relay
+        });
+
+        let publish_result = self.write_publish(publish_data);
+        let notified = publish_result.is_ok();
+
+        // Remove connection locally regardless of publish success
+        let removed = self.remove_connection(server_pubkey_hex);
+
+        tracing::info!("[NIP46] Disconnect: removed={}, notified={}", removed, notified);
+
+        Ok(scroll("/nostr/nip46/disconnect", "nostr/connections@v1", json!({
+            "removed": removed,
+            "notified": notified,
+            "pubkey": server_pubkey_hex
+        })))
+    }
+
     fn write_connections_clear(&self) -> NineSResult<Scroll> {
         let count = self.clear_connections();
         Ok(scroll("/nostr/connections/clear", "nostr/connections@v1", json!({
@@ -313,6 +377,7 @@ impl Namespace for NostrNamespace {
             "/beebase/connect" => self.write_beebase_connect(data),
             "/beebase/disconnect" => self.write_beebase_disconnect(),
             "/nip46/respond" => self.write_nip46_respond(data),
+            "/nip46/disconnect" => self.write_nip46_disconnect(data),
             "/connections/clear" => self.write_connections_clear(),
             _ => {
                 // Handle /connections/{pubkey}/revoke pattern
